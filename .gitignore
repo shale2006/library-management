@@ -24,3 +24,7 @@ dist-ssr
 *.sw?
 backend/.env
 backend/node_modules/
+# Protect environment and database credentials
+.env
+**/.env
+*.pem

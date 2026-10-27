@@ -1,145 +1,171 @@
-import { useState } from "react";
+
+import { useEffect, useState } from "react";
+
+const BOOKS_API = "http://localhost:5001/api/books";
+const MEMBERS_API = "http://localhost:5001/api/members";
+const TRANSACTIONS_API = "http://localhost:5001/api/transactions";
 
 function Transactions() {
-  const [books, setBooks] = useState(() => {
-    const savedBooks = localStorage.getItem("books");
-    return savedBooks ? JSON.parse(savedBooks) : [];
-  });
-
-  const [transactions, setTransactions] = useState(() => {
-    const savedTransactions = localStorage.getItem("transactions");
-    return savedTransactions ? JSON.parse(savedTransactions) : [];
-  });
-
+  const [books, setBooks] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [transactions, setTransactions] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [selectedBook, setSelectedBook] = useState("");
+  const [selectedMember, setSelectedMember] = useState("");
   const [type, setType] = useState("Borrowed");
-  const [quantity, setQuantity] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
-  const recordTransaction = (e) => {
+  const loadData = async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const [booksResponse, membersResponse, transactionsResponse] =
+        await Promise.all([
+          fetch(BOOKS_API),
+          fetch(MEMBERS_API),
+          fetch(TRANSACTIONS_API),
+        ]);
+
+      if (
+        !booksResponse.ok ||
+        !membersResponse.ok ||
+        !transactionsResponse.ok
+      ) {
+        throw new Error("Could not load library data.");
+      }
+
+      const [booksData, membersData, transactionsData] = await Promise.all([
+        booksResponse.json(),
+        membersResponse.json(),
+        transactionsResponse.json(),
+      ]);
+
+      setBooks(booksData);
+      setMembers(membersData);
+      setTransactions(transactionsData);
+    } catch (err) {
+      setError(err.message || "Could not connect to the backend.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const recordTransaction = async (e) => {
     e.preventDefault();
+    setError("");
 
-    if (!selectedBook || !quantity) {
-      alert("Please fill in all fields");
+    if (!selectedBook || !selectedMember) {
+      setError("Please select both a book and a member.");
       return;
     }
 
-    const book = books.find(
-      (book) => book.id === Number(selectedBook)
-    );
+    setSaving(true);
 
-    const transactionQuantity = Number(quantity);
+    try {
+      const response = await fetch(TRANSACTIONS_API, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          bookId: Number(selectedBook),
+          memberId: Number(selectedMember),
+          type,
+        }),
+      });
 
-    if (!book) {
-      alert("Please select a book");
-      return;
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message || "Transaction failed.");
+      }
+
+      setSelectedBook("");
+      setSelectedMember("");
+      setType("Borrowed");
+      setShowForm(false);
+
+      await loadData();
+
+      alert("Transaction recorded successfully!");
+    } catch (err) {
+      setError(err.message || "Could not save transaction.");
+    } finally {
+      setSaving(false);
     }
-
-    if (
-      type === "Borrowed" &&
-      transactionQuantity > Number(book.quantity)
-    ) {
-      alert("Not enough books available");
-      return;
-    }
-
-    let updatedBooks;
-
-    if (type === "Borrowed") {
-      updatedBooks = books.map((item) =>
-        item.id === book.id
-          ? {
-              ...item,
-              quantity:
-                Number(item.quantity) - transactionQuantity,
-            }
-          : item
-      );
-    } else {
-      updatedBooks = books.map((item) =>
-        item.id === book.id
-          ? {
-              ...item,
-              quantity:
-                Number(item.quantity) + transactionQuantity,
-            }
-          : item
-      );
-    }
-
-    setBooks(updatedBooks);
-
-    localStorage.setItem(
-      "books",
-      JSON.stringify(updatedBooks)
-    );
-
-    const newTransaction = {
-      id: Date.now(),
-      bookId: book.id,
-      bookTitle: book.title,
-      type: type,
-      quantity: transactionQuantity,
-      date: new Date().toLocaleString(),
-    };
-
-    const updatedTransactions = [
-      ...transactions,
-      newTransaction,
-    ];
-
-    setTransactions(updatedTransactions);
-
-    localStorage.setItem(
-      "transactions",
-      JSON.stringify(updatedTransactions)
-    );
-
-    setSelectedBook("");
-    setType("Borrowed");
-    setQuantity(1);
-    setShowForm(false);
   };
 
   return (
     <div className="page">
-
       <div className="library-header">
         <h1>Community Library</h1>
         <p>Library Management System</p>
       </div>
 
       <div className="transactions-card">
-
         <h2>Transactions</h2>
 
         <button
           className="record-transaction-button"
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => {
+            setError("");
+            setShowForm(!showForm);
+          }}
         >
-          Record Transaction
+          {showForm ? "Cancel Transaction" : "Record Transaction"}
         </button>
 
-        {showForm && (
-          <form
-            className="transaction-form"
-            onSubmit={recordTransaction}
+        {error && (
+          <p
+            role="alert"
+            style={{ color: "red", marginTop: "12px" }}
           >
+            {error}
+          </p>
+        )}
+
+        {showForm && (
+          <form className="transaction-form" onSubmit={recordTransaction}>
+            <label>Select Book</label>
 
             <select
               value={selectedBook}
-              onChange={(e) =>
-                setSelectedBook(e.target.value)
-              }
+              onChange={(e) => setSelectedBook(e.target.value)}
+              required
             >
               <option value="">Select Book</option>
 
               {books.map((book) => (
                 <option key={book.id} value={book.id}>
-                  {book.title}
+                  {book.title} — Available: {book.quantity}
                 </option>
               ))}
             </select>
+
+            <label>Select Member</label>
+
+            <select
+              value={selectedMember}
+              onChange={(e) => setSelectedMember(e.target.value)}
+              required
+            >
+              <option value="">Select Member</option>
+
+              {members.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name} ({member.memberId})
+                </option>
+              ))}
+            </select>
+
+            <label>Transaction Type</label>
 
             <select
               value={type}
@@ -149,74 +175,60 @@ function Transactions() {
               <option value="Returned">Returned</option>
             </select>
 
-            <input
-              type="number"
-              min="1"
-              value={quantity}
-              onChange={(e) =>
-                setQuantity(e.target.value)
-              }
-            />
-
-            <button type="submit">
-              Save Transaction
+            <button type="submit" disabled={saving}>
+              {saving ? "Saving..." : "Save Transaction"}
             </button>
 
             <button
               type="button"
-              onClick={() => setShowForm(false)}
+              onClick={() => {
+                setShowForm(false);
+                setError("");
+              }}
             >
               Cancel
             </button>
-
           </form>
         )}
 
         <div className="transaction-table-container">
-
-          <table className="transaction-table">
-
-            <thead>
-              <tr>
-                <th>Book</th>
-                <th>Type</th>
-                <th>Quantity</th>
-                <th>Date</th>
-              </tr>
-            </thead>
-
-            <tbody>
-
-              {transactions.length === 0 ? (
+          {loading ? (
+            <p>Loading transactions...</p>
+          ) : (
+            <table className="transaction-table">
+              <thead>
                 <tr>
-                  <td colSpan="4">
-                    No transactions available.
-                  </td>
+                  <th>Book</th>
+                  <th>Member</th>
+                  <th>Type</th>
+                  <th>Date</th>
                 </tr>
-              ) : (
-                transactions.map((transaction) => (
-                  <tr key={transaction.id}>
+              </thead>
 
-                    <td>{transaction.bookTitle}</td>
-
-                    <td>{transaction.type}</td>
-
-                    <td>{transaction.quantity}</td>
-
-                    <td>{transaction.date}</td>
-
+              <tbody>
+                {transactions.length === 0 ? (
+                  <tr>
+                    <td colSpan="4">No transactions available.</td>
                   </tr>
-                ))
-              )}
-
-            </tbody>
-
-          </table>
-
+                ) : (
+                  transactions.map((transaction) => (
+                    <tr key={transaction.id}>
+                      <td>{transaction.bookTitle}</td>
+                      <td>{transaction.memberName}</td>
+                      <td>{transaction.type}</td>
+                      <td>
+                        {transaction.type === "Returned"
+                          ? transaction.returnDate
+                          : transaction.borrowDate}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          )}
         </div>
-
       </div>
-
     </div>
   );
 }
